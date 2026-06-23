@@ -75,8 +75,8 @@ if (Test-Path ".venv") {
 Write-Host "Upgrading pip..." -ForegroundColor Cyan
 & .venv\Scripts\python.exe -m pip install --upgrade pip
 
-Write-Host "Installing dependencies (sounddevice, soundfile, numpy, assemblyai, pyperclip, pynput, pystray, PyQt6)..." -ForegroundColor Cyan
-& .venv\Scripts\pip.exe install sounddevice soundfile numpy assemblyai pyperclip pynput pystray PyQt6
+Write-Host "Installing dependencies from requirements.txt..." -ForegroundColor Cyan
+& .venv\Scripts\pip.exe install -r requirements.txt
 
 if ($?) {
     Write-Host "`nSetup completed successfully! All dependencies installed." -ForegroundColor Green

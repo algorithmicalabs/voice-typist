@@ -1,0 +1,9 @@
+sounddevice>=0.5.5
+soundfile>=0.14.0
+numpy>=2.5.0
+assemblyai>=0.64.21
+pyperclip>=1.11.0
+pynput>=1.8.2
+pystray>=0.19.5
+PyQt6>=6.11.0
+Pillow>=12.2.0

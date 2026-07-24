@@ -16,6 +16,7 @@ from audio import AudioRecorder
 from transcriber import transcribe_audio
 from voice_ui import HoveringRibbon
 from sound_fx import SoundFX
+from windows_input import paste_text_via_sendinput, release_all_modifiers
 
 # Virtual Key Code Mapping for common keys
 VK_MAP = {
@@ -178,16 +179,22 @@ class VoiceTypistApp(QObject):
         """
         Win32 event hook filter. Runs on the keyboard hook thread.
         Emits signals to execute recording state updates on the main Qt thread.
+        NEVER suppresses keyup (release) events to ensure Windows OS modifier states stay 100% clean.
         """
         vk = data.vkCode
         is_down = (msg == 256 or msg == 260)
         is_up = (msg == 257 or msg == 261)
         
+        # NEVER suppress keyup (release) events for any key!
+        # Suppressing keyup events corrupts Windows OS modifier key state table.
+        if is_up:
+            return True
+            
         # 1. Handle Cancel Recording (Escape key)
         if self.recording_active and vk == 0x1B: # VK_ESCAPE
             if is_down:
                 self.signals.cancel_recording.emit()
-            return False # Suppress key down and up
+            return False # Suppress key down only
             
         # 2. Handle Stop Recording (Stop hotkey)
         if self.recording_active and vk == self.stop_primary:
@@ -195,22 +202,15 @@ class VoiceTypistApp(QObject):
             if mods_pressed:
                 if is_down:
                     self.signals.stop_recording.emit()
-                return False # Suppress key down and up
+                return False # Suppress key down only
                 
-        # 2. Handle Start Recording (Start hotkey)
+        # 3. Handle Start Recording (Start hotkey)
         if not self.recording_active and not self.transcribing_active and vk == self.start_primary:
             mods_pressed = all(self._is_pressed(m) for m in self.start_modifiers)
             if mods_pressed:
                 if is_down:
-                    self.suppress_primary_start_up = True
                     self.signals.start_recording.emit()
-                return False # Suppress key down
-                
-        # Suppress the release event of the start hotkey to prevent junk character inputs
-        if vk == self.start_primary and is_up:
-            if self.suppress_primary_start_up:
-                self.suppress_primary_start_up = False
-                return False # Suppress key up
+                return False # Suppress key down only
                 
         return True
 
@@ -333,76 +333,14 @@ class VoiceTypistApp(QObject):
         self.ribbon.update_status(status, message)
 
     def paste_text(self, text):
-        """Paste text at cursor using clipboard manipulation."""
-        # Restore focus to the target window if we have one
-        if hasattr(self, 'target_hwnd') and self.target_hwnd:
-            print(f"Restoring focus to window HWND: {self.target_hwnd}")
-            # ONLY call ShowWindow if the window is minimized (iconic). 
-            # Calling ShowWindow on a maximized window — even SW_SHOW — causes it to shrink.
-            # So we skip ShowWindow entirely for non-minimized windows and only steal focus.
-            if ctypes.windll.user32.IsIconic(self.target_hwnd):
-                # SW_RESTORE (9): brings a minimized window back to normal
-                ctypes.windll.user32.ShowWindow(self.target_hwnd, 9)
-            # Do NOT call ShowWindow for maximized/normal windows - it will shrink them
-            ctypes.windll.user32.SetForegroundWindow(self.target_hwnd)
-            time.sleep(0.15) # Wait for OS window focus transition
-            
-        try:
-            original_clipboard = pyperclip.paste()
-        except Exception:
-            original_clipboard = ""
-            
-        try:
-            pyperclip.copy(text)
-            time.sleep(0.15) # Wait for OS clipboard update
-            
-            # Win32 virtual key codes
-            VK_CONTROL = 0x11
-            VK_SHIFT = 0x10
-            VK_V = 0x56
-            KEYEVENTF_KEYUP = 0x0002
-            
-            # Force release control and shift first to clear physical stuck states
-            ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-            ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.02)
-            
-            # Press Ctrl
-            ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-            time.sleep(0.01)
-            
-            # Press V
-            ctypes.windll.user32.keybd_event(VK_V, 0, 0, 0)
-            time.sleep(0.03)
-            
-            # Release V
-            ctypes.windll.user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.01)
-            
-            # Release Ctrl
-            ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.02)
-            
-            # Double check modifier release
-            ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-            ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-                
-            # Allow the application a dynamic moment to process the paste.
-            # Longer text requires more time for the target application to read from clipboard.
-            # We scale the sleep time: 0.6s minimum, up to 2.5s for very long paragraphs.
-            dynamic_sleep = max(0.6, min(2.5, len(text) / 300.0))
-            time.sleep(dynamic_sleep)
-        finally:
-            # Restore original clipboard
-            if original_clipboard is not None:
-                try:
-                    pyperclip.copy(original_clipboard)
-                except Exception:
-                    pass
+        """Paste text at cursor using modern SendInput API with complete modifier cleanup."""
+        target_hwnd = getattr(self, 'target_hwnd', None)
+        paste_text_via_sendinput(text, target_hwnd=target_hwnd)
 
     def cleanup(self):
         """Cleanup resources on app exit."""
         print("Cleaning up resources...")
+        release_all_modifiers()
         if self.recording_active:
             self.recorder.stop()
         if hasattr(self, 'recorder'):
@@ -440,6 +378,11 @@ class VoiceTypistApp(QObject):
             print(f"Error managing startup shortcut: {e}")
 
 if __name__ == "__main__":
+    # Isolate PyQt6 scaling and theme execution from system environment
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    
     app_qt = QApplication(sys.argv)
+    app_qt.setStyle("Fusion") # Use isolated Qt Fusion style
+    
     app = VoiceTypistApp()
     sys.exit(app_qt.exec())

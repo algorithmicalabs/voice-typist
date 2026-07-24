@@ -15,6 +15,7 @@ import config
 from audio import AudioRecorder
 from transcriber import transcribe_audio
 from voice_ui import HoveringRibbon
+from sound_fx import SoundFX
 
 # Virtual Key Code Mapping for common keys
 VK_MAP = {
@@ -99,6 +100,7 @@ class VoiceTypistApp(QObject):
         
         # 3. Initialize components
         self.recorder = AudioRecorder(filename=self.wav_path)
+        self.sound_fx = SoundFX(os.path.join(self.temp_dir, "sounds"))
         self.keyboard_controller = keyboard.Controller()
         
         # 4. Set state variables
@@ -213,22 +215,10 @@ class VoiceTypistApp(QObject):
         return True
 
     def play_beep(self, type_name):
-        """Play feedback sound indicators (soft click clicks)."""
+        """Play non-blocking feedback sound indicators (crisp UI taps)."""
         if not self.app_config.get("sound_effects", True):
             return
-        try:
-            if type_name == "start":
-                winsound.Beep(2000, 20) # Soft tick
-            elif type_name == "stop":
-                winsound.Beep(1400, 20) # Soft tack
-            elif type_name == "success":
-                winsound.Beep(2000, 15)
-                time.sleep(0.04)
-                winsound.Beep(2200, 15) # Double tick
-            elif type_name == "error":
-                winsound.Beep(250, 150) # Soft low buzz
-        except Exception as e:
-            print(f"Beep error: {e}")
+        self.sound_fx.play(type_name)
 
     def handle_record_button_click(self):
         """Handle clicks on the record button (toggles start or cancel)."""
@@ -415,6 +405,8 @@ class VoiceTypistApp(QObject):
         print("Cleaning up resources...")
         if self.recording_active:
             self.recorder.stop()
+        if hasattr(self, 'recorder'):
+            self.recorder.close()
         if self.listener:
             self.listener.stop()
         if os.path.exists(self.wav_path):

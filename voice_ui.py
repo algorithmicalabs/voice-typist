@@ -544,14 +544,18 @@ class HoveringRibbon(QWidget):
     def restore_position(self):
         x = self.config_data.get("window_x")
         y = self.config_data.get("window_y")
-        screen = QApplication.primaryScreen().geometry()
+        avail = QApplication.primaryScreen().availableGeometry()
         
         if x is not None and y is not None:
-            x = max(0, min(x, screen.width() - self.width()))
-            y = max(0, min(y, screen.height() - self.height()))
+            max_x = avail.left() + avail.width() - self.width()
+            max_y = avail.top() + avail.height() - self.height() - 10
+            x = max(avail.left(), min(x, max_x))
+            y = max(avail.top(), min(y, max_y))
             self.move(x, y)
         else:
-            self.move((screen.width() - self.width()) // 2, screen.height() - 110)
+            def_x = avail.left() + (avail.width() - self.width()) // 2
+            def_y = avail.top() + avail.height() - self.height() - 60
+            self.move(def_x, def_y)
 
     def update_volume(self, volume):
         self.wave.set_volume(volume)
@@ -689,8 +693,10 @@ class HoveringRibbon(QWidget):
         menu.exec(event.globalPos())
 
     def reset_position(self):
-        screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, screen.height() - 110)
+        avail = QApplication.primaryScreen().availableGeometry()
+        def_x = avail.left() + (avail.width() - self.width()) // 2
+        def_y = avail.top() + avail.height() - self.height() - 60
+        self.move(def_x, def_y)
         pos = self.pos()
         self.config_data["window_x"] = pos.x()
         self.config_data["window_y"] = pos.y()
